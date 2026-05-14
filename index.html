@@ -9,16 +9,17 @@
         body { background: var(--bg); color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; padding: 20px; text-align: center; }
         
         .search-box { margin-bottom: 30px; width: 100%; max-width: 400px; display: flex; gap: 10px; }
-        input { flex: 1; padding: 12px; background: #111; border: 1px solid #333; color: white; border-radius: 8px; }
+        input { flex: 1; padding: 12px; background: #111; border: 1px solid #333; color: white; border-radius: 8px; outline: none; }
+        input:focus { border-color: var(--accent); }
         button { padding: 12px; background: var(--accent); border: none; border-radius: 8px; font-weight: bold; cursor: pointer; color: #000; }
 
         #countdown { font-size: 5rem; font-weight: 800; color: var(--accent); margin-top: 20px; }
-        .label { font-size: 1rem; color: #888; text-transform: uppercase; letter-spacing: 2px; }
+        .label { font-size: 0.8rem; color: #888; text-transform: uppercase; letter-spacing: 2px; }
         
         .gauge-container { margin-top: 40px; border: 2px solid #222; width: 80px; height: 200px; position: relative; border-radius: 10px; overflow: hidden; background: #050505; }
         #water-level { position: absolute; bottom: 0; width: 100%; background: var(--accent); transition: height 1s ease-in-out; box-shadow: 0 0 20px var(--accent); }
         
-        #status-msg { margin-top: 15px; font-size: 1.2rem; }
+        #status-msg { margin-top: 15px; font-size: 1.2rem; min-height: 1.5em; }
         .footer-data { margin-top: auto; padding: 20px; color: #444; font-size: 0.8rem; }
     </style>
 </head>
@@ -33,27 +34,30 @@
     <div id="countdown">--</div>
     <div class="label">MINUTES</div>
 
-    <div id="status-msg">Detecting Location...</div>
+    <div id="status-msg">Initializing...</div>
 
     <div class="gauge-container">
         <div id="water-level" style="height: 0%;"></div>
     </div>
     <div class="label" style="margin-top:10px;">Volume (Next 24h)</div>
-    <div id="volume-text" style="color: var(--accent); font-weight: bold;">0.0 mm</div>
+    <div id="volume-text" style="color: var(--accent); font-weight: bold; font-size: 1.5rem;">0.0 mm</div>
 
-    <div class="footer-data" id="location-name">Determining position...</div>
+    <div class="footer-data" id="location-name">Waiting for location...</div>
 
     <script>
-        const API_KEY = 'YOUR_WEATHERAPI_KEY'; // Replace with your key
+        // Integrated your specific API Key
+        const API_KEY = '371f195d68084031ade140420261405'; 
 
-        // 1. Auto-detect location on load
         window.onload = () => {
             if (navigator.geolocation) {
+                document.getElementById('status-msg').innerText = "Requesting GPS...";
                 navigator.geolocation.getCurrentPosition(pos => {
                     fetchRainData(`${pos.coords.latitude},${pos.coords.longitude}`);
                 }, err => {
-                    document.getElementById('status-msg').innerText = "Location access denied. Please search manually.";
+                    document.getElementById('status-msg').innerText = "GPS denied. Search manually.";
                 });
+            } else {
+                document.getElementById('status-msg').innerText = "Search for a location.";
             }
         };
 
@@ -63,46 +67,51 @@
         }
 
         async function fetchRainData(query) {
-            document.getElementById('status-msg').innerText = "Fetching data...";
+            document.getElementById('status-msg').innerText = "Updating...";
             try {
+                // Fixed to use HTTPS to prevent the Error Fetching Data issue
                 const response = await fetch(`https://api.weatherapi.com/v1/forecast.json?key=${API_KEY}&q=${query}&days=1&aqi=no`);
+                
+                if (!response.ok) throw new Error('API Response Error');
+                
                 const data = await response.json();
                 updateUI(data);
             } catch (error) {
-                alert("Error fetching weather data.");
+                console.error(error);
+                document.getElementById('status-msg').innerText = "Check API Key or Connection";
             }
         }
 
         function updateUI(data) {
             const hours = data.forecast.forecastday[0].hour;
-            const currentHour = new Date().getHours();
+            const now = new Date();
             let rainFound = false;
             let totalVol = 0;
 
-            // Update Location Label
             document.getElementById('location-name').innerText = `${data.location.name}, ${data.location.region}`;
 
-            // Logic for next rain timing
-            for (let i = currentHour; i < hours.length; i++) {
+            for (let i = 0; i < hours.length; i++) {
+                const forecastTime = new Date(hours[i].time);
+                
+                // Add to total 24h volume
                 totalVol += hours[i].precip_mm;
-                if (!rainFound && hours[i].precip_mm > 0) {
-                    const now = new Date();
-                    const rainTime = new Date(hours[i].time);
-                    const diffMins = Math.max(0, Math.round((rainTime - now) / 60000));
-                    
+
+                // Look for the NEXT rain event starting from the current time
+                if (!rainFound && hours[i].precip_mm > 0 && forecastTime > now) {
+                    const diffMins = Math.max(0, Math.round((forecastTime - now) / 60000));
                     document.getElementById('countdown').innerText = diffMins;
-                    document.getElementById('status-msg').innerText = "Light showers expected soon.";
+                    document.getElementById('status-msg').innerText = `Expected: ${hours[i].condition.text}`;
                     rainFound = true;
                 }
             }
 
             if (!rainFound) {
                 document.getElementById('countdown').innerText = "0";
-                document.getElementById('status-msg').innerText = "No rain expected today.";
+                document.getElementById('status-msg').innerText = "Clear skies expected.";
             }
 
-            // Update Volume Gauge (Max height at 25mm for scale)
-            const gaugePercent = Math.min((totalVol / 25) * 100, 100);
+            // Update Volume Gauge (Scale: 100% height = 20mm of rain)
+            const gaugePercent = Math.min((totalVol / 20) * 100, 100);
             document.getElementById('water-level').style.height = gaugePercent + "%";
             document.getElementById('volume-text').innerText = totalVol.toFixed(1) + " mm";
         }
